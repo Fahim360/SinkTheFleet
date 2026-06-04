@@ -34,7 +34,7 @@ interface RoomState {
 }
 
 export class BattleshipRoom extends Room {
-  private state: RoomState = {
+  private roomState: RoomState = {
     phase: "waiting",
     players: new Map(),
     spectators: new Set(),
@@ -58,10 +58,10 @@ export class BattleshipRoom extends Room {
 
   onJoin(client: Client, options: { username?: string; discordUserId?: string; avatarUrl?: string }) {
     const username = options?.username || `Player-${client.sessionId.slice(0, 4)}`;
-    const isSpectator = this.state.players.size >= 2;
+    const isSpectator = this.roomState.players.size >= 2;
 
     if (isSpectator) {
-      this.state.spectators.add(client.sessionId);
+      this.roomState.spectators.add(client.sessionId);
       const info: PlayerInfo = {
         sessionId: client.sessionId,
         discordUserId: options?.discordUserId,
@@ -71,7 +71,7 @@ export class BattleshipRoom extends Room {
         ready: false,
         shipsPlaced: false,
       };
-      this.state.players.set(client.sessionId, {
+      this.roomState.players.set(client.sessionId, {
         info,
         board: createEmptyBoard(),
         ships: [],
@@ -87,14 +87,14 @@ export class BattleshipRoom extends Room {
         ready: false,
         shipsPlaced: false,
       };
-      this.state.players.set(client.sessionId, {
+      this.roomState.players.set(client.sessionId, {
         info,
         board: createEmptyBoard(),
         ships: [],
       });
-      console.log(`[Room] Player joined: ${username} (${this.state.players.size}/2 players)`);
+      console.log(`[Room] Player joined: ${username} (${this.roomState.players.size}/2 players)`);
 
-      if (this.state.players.size >= 2 && this.state.phase === "waiting") {
+      if (this.roomState.players.size >= 2 && this.roomState.phase === "waiting") {
         this.transitionTo("placing");
       }
     }
@@ -104,23 +104,23 @@ export class BattleshipRoom extends Room {
   }
 
   onLeave(client: Client, consented: boolean) {
-    const player = this.state.players.get(client.sessionId);
+    const player = this.roomState.players.get(client.sessionId);
     if (!player) return;
 
     const { username, isSpectator } = player.info;
     console.log(`[Room] ${username} left (consented: ${consented})`);
 
-    this.state.players.delete(client.sessionId);
-    this.state.spectators.delete(client.sessionId);
+    this.roomState.players.delete(client.sessionId);
+    this.roomState.spectators.delete(client.sessionId);
 
-    if (!isSpectator && this.state.phase !== "finished" && this.state.phase !== "waiting") {
+    if (!isSpectator && this.roomState.phase !== "finished" && this.roomState.phase !== "waiting") {
       // A real player left mid-game; end the game
       this.addLog(`${username} disconnected — game ended`, "system");
-      this.state.phase = "waiting";
-      this.state.currentTurnId = null;
-      this.state.winnerId = null;
+      this.roomState.phase = "waiting";
+      this.roomState.currentTurnId = null;
+      this.roomState.winnerId = null;
       // Clear remaining player states
-      for (const [id, p] of this.state.players) {
+      for (const [id, p] of this.roomState.players) {
         if (!p.info.isSpectator) {
           p.board = createEmptyBoard();
           p.ships = [];
@@ -128,7 +128,7 @@ export class BattleshipRoom extends Room {
           p.info.shipsPlaced = false;
         }
       }
-    } else if (!isSpectator && this.state.phase === "waiting") {
+    } else if (!isSpectator && this.roomState.phase === "waiting") {
       // Nothing to do
     }
 
@@ -143,7 +143,7 @@ export class BattleshipRoom extends Room {
   // ─── Message Handling ───────────────────────────────────────────────────────
 
   private handleMessage(client: Client, msg: ClientMessage) {
-    const player = this.state.players.get(client.sessionId);
+    const player = this.roomState.players.get(client.sessionId);
     if (!player) return;
 
     switch (msg.type) {
@@ -178,7 +178,7 @@ export class BattleshipRoom extends Room {
 
   private handlePlaceShips(client: Client, player: PlayerState, ships: PlacedShip[]) {
     if (player.info.isSpectator) return;
-    if (this.state.phase !== "placing") {
+    if (this.roomState.phase !== "placing") {
       this.sendError(client, "Cannot place ships in current phase");
       return;
     }
@@ -197,7 +197,7 @@ export class BattleshipRoom extends Room {
 
   private handleRandomizeShips(client: Client, player: PlayerState) {
     if (player.info.isSpectator) return;
-    if (this.state.phase !== "placing") {
+    if (this.roomState.phase !== "placing") {
       this.sendError(client, "Cannot randomize ships in current phase");
       return;
     }
@@ -220,7 +220,7 @@ export class BattleshipRoom extends Room {
 
   private handleSetReady(client: Client, player: PlayerState) {
     if (player.info.isSpectator) return;
-    if (this.state.phase !== "placing") {
+    if (this.roomState.phase !== "placing") {
       this.sendError(client, "Cannot ready in current phase");
       return;
     }
@@ -246,11 +246,11 @@ export class BattleshipRoom extends Room {
       this.sendError(client, "Spectators cannot attack");
       return;
     }
-    if (this.state.phase !== "playing") {
+    if (this.roomState.phase !== "playing") {
       this.sendError(client, "Game is not in playing phase");
       return;
     }
-    if (this.state.currentTurnId !== client.sessionId) {
+    if (this.roomState.currentTurnId !== client.sessionId) {
       this.sendError(client, "Not your turn");
       return;
     }
@@ -295,13 +295,13 @@ export class BattleshipRoom extends Room {
     };
 
     if (result.gameOver) {
-      this.state.phase = "finished";
-      this.state.winnerId = client.sessionId;
+      this.roomState.phase = "finished";
+      this.roomState.winnerId = client.sessionId;
       this.addLog(`🏆 ${player.info.username} wins!`, "system");
     } else {
       // Switch turns
       const activePlayers = this.getActivePlayers();
-      this.state.currentTurnId =
+      this.roomState.currentTurnId =
         activePlayers.find((p) => p.info.sessionId !== client.sessionId)?.info.sessionId || null;
     }
 
@@ -316,10 +316,10 @@ export class BattleshipRoom extends Room {
 
   private handlePlayAgain(client: Client, player: PlayerState) {
     if (player.info.isSpectator) return;
-    if (this.state.phase !== "finished") return;
+    if (this.roomState.phase !== "finished") return;
 
     // Reset all player states
-    for (const [, p] of this.state.players) {
+    for (const [, p] of this.roomState.players) {
       if (!p.info.isSpectator) {
         p.board = createEmptyBoard();
         p.ships = [];
@@ -328,9 +328,9 @@ export class BattleshipRoom extends Room {
       }
     }
 
-    this.state.currentTurnId = null;
-    this.state.winnerId = null;
-    this.state.log = [];
+    this.roomState.currentTurnId = null;
+    this.roomState.winnerId = null;
+    this.roomState.log = [];
 
     const activePlayers = this.getActivePlayers();
     if (activePlayers.length >= 2) {
@@ -346,12 +346,12 @@ export class BattleshipRoom extends Room {
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
   private getActivePlayers(): PlayerState[] {
-    return Array.from(this.state.players.values()).filter((p) => !p.info.isSpectator);
+    return Array.from(this.roomState.players.values()).filter((p) => !p.info.isSpectator);
   }
 
   private transitionTo(phase: GamePhase) {
-    console.log(`[Room] Phase: ${this.state.phase} → ${phase}`);
-    this.state.phase = phase;
+    console.log(`[Room] Phase: ${this.roomState.phase} → ${phase}`);
+    this.roomState.phase = phase;
   }
 
   private startGame() {
@@ -359,16 +359,16 @@ export class BattleshipRoom extends Room {
     const activePlayers = this.getActivePlayers();
     // Random first turn
     const firstPlayer = activePlayers[Math.floor(Math.random() * 2)];
-    this.state.currentTurnId = firstPlayer.info.sessionId;
+    this.roomState.currentTurnId = firstPlayer.info.sessionId;
     this.addLog(`Game started! ${firstPlayer.info.username} goes first.`, "system");
     this.broadcastState();
   }
 
   private addLog(message: string, type: LogEntry["type"]) {
-    this.state.log.push({ timestamp: Date.now(), message, type });
+    this.roomState.log.push({ timestamp: Date.now(), message, type });
     // Keep last 50 entries
-    if (this.state.log.length > 50) {
-      this.state.log = this.state.log.slice(-50);
+    if (this.roomState.log.length > 50) {
+      this.roomState.log = this.roomState.log.slice(-50);
     }
   }
 
@@ -378,9 +378,9 @@ export class BattleshipRoom extends Room {
 
   private buildClientState(forSessionId: string): ClientGameState {
     const activePlayers = this.getActivePlayers();
-    const me = this.state.players.get(forSessionId);
+    const me = this.roomState.players.get(forSessionId);
 
-    const playerInfos = Array.from(this.state.players.values())
+    const playerInfos = Array.from(this.roomState.players.values())
       .filter((p) => !p.info.isSpectator)
       .map((p) => p.info);
 
@@ -407,16 +407,16 @@ export class BattleshipRoom extends Room {
     }
 
     return {
-      phase: this.state.phase,
+      phase: this.roomState.phase,
       players: playerInfos,
       mySessionId: forSessionId,
-      currentTurnId: this.state.currentTurnId,
-      winnerId: this.state.winnerId,
+      currentTurnId: this.roomState.currentTurnId,
+      winnerId: this.roomState.winnerId,
       myBoard,
       opponentBoard,
       myShips,
-      log: this.state.log,
-      spectatorCount: this.state.spectators.size,
+      log: this.roomState.log,
+      spectatorCount: this.roomState.spectators.size,
     };
   }
 
