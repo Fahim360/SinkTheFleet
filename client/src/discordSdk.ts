@@ -1,7 +1,7 @@
 import { DiscordSDK, DiscordSDKMock } from "@discord/embedded-app-sdk";
 
 // Discord Application ID from environment variable
-const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID || "YOUR_APP_CLIENT_ID";
+const CLIENT_ID = (import.meta as unknown as { env: Record<string, string> }).env.VITE_DISCORD_CLIENT_ID || "YOUR_APP_CLIENT_ID";
 
 // Detect if we're running inside Discord Activity iframe
 // Discord Activities are loaded inside an iframe on the discord.com domain
@@ -45,7 +45,7 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
   // In development / outside Discord, use mock SDK
   if (!isRunningInDiscord() || CLIENT_ID === "YOUR_APP_CLIENT_ID") {
     console.log("[Discord SDK] Using mock SDK (not running inside Discord)");
-    const mockSdk = new DiscordSDKMock(CLIENT_ID, null, null);
+    const mockSdk = new DiscordSDKMock(CLIENT_ID, null, null, null);
     _sdk = mockSdk;
 
     // Mock context for development

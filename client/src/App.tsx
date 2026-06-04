@@ -14,7 +14,7 @@ import { PlacedShip } from "./types";
 // - In Discord Activity (iframe), use relative proxy path
 // - In dev, use env var or localhost
 function resolveServerUrl(): string {
-  const fromEnv = import.meta.env.VITE_SERVER_URL as string | undefined;
+  const fromEnv = (import.meta as unknown as { env: Record<string, string> }).env.VITE_SERVER_URL;
   if (fromEnv) return fromEnv;
 
   // If running behind Discord's proxy (in an iframe), use relative WS path
