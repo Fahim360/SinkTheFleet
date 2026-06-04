@@ -28,17 +28,11 @@ app.post("/api/room", async (req, res) => {
 
 const httpServer = http.createServer(app);
 
-// Colyseus 0.15 — pass server only, no express option
-const gameServer = new Server({
-  server: httpServer,
-});
+const gameServer = new Server({ server: httpServer });
 
-gameServer.define("battleship", BattleshipRoom, {
-  filterBy: ["roomId"],
-});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(gameServer.define("battleship", BattleshipRoom) as any).filterBy(["roomId"]);
 
 httpServer.listen(PORT, () => {
-  console.log(`Ship Sink the Fleet server running on port ${PORT}`);
-  console.log(`   WebSocket: ws://localhost:${PORT}`);
-  console.log(`   Health:    http://localhost:${PORT}/health`);
+  console.log(`Sink the Fleet server running on port ${PORT}`);
 });
