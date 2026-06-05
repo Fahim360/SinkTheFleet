@@ -1,261 +1,176 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { SHIP_DEFINITIONS, Cell, CellState } from "../types";
-import { PlacedShip } from "../types";
+import { SHIP_DEFINITIONS, Cell, CellState, PlayerInfo, PlacedShip } from "../types";
 import { Grid } from "./Grid";
 import { PlayerCard } from "./PlayerCard";
-import { PlayerInfo } from "../types";
-import {
-  getShipCells,
-  isValidPlacement,
-  buildOccupiedMap,
-  randomizePlacementsClient,
-} from "../utils/placement";
+import { getShipCells, isValidPlacement, randomizePlacementsClient } from "../utils/placement";
 
-interface PlacementScreenProps {
-  onPlaceShips: (ships: PlacedShip[]) => void;
-  onRandomize: () => void;
-  onReady: () => void;
-  myInfo: PlayerInfo;
-  opponent: PlayerInfo | null;
-  isReady: boolean;
-  isShipsPlaced: boolean;
-}
-
-function buildBoardFromPlacements(placements: PlacedShip[]): Cell[][] {
-  const board: Cell[][] = [];
-  for (let y = 0; y < 10; y++) {
-    board[y] = [];
-    for (let x = 0; x < 10; x++) {
-      board[y][x] = { x, y, state: "empty" as CellState };
-    }
-  }
+function buildBoard(placements: PlacedShip[]): Cell[][] {
+  const board: Cell[][] = Array.from({ length: 10 }, (_, y) =>
+    Array.from({ length: 10 }, (_, x) => ({ x, y, state: "empty" as CellState }))
+  );
   for (const p of placements) {
-    const def = SHIP_DEFINITIONS.find((s) => s.id === p.shipId);
+    const def = SHIP_DEFINITIONS.find(s => s.id === p.shipId);
     if (!def) continue;
-    const cells = getShipCells(p.x, p.y, def.size, p.horizontal);
-    for (const c of cells) {
-      board[c.y][c.x].state = "ship";
-      board[c.y][c.x].shipId = p.shipId;
+    for (const c of getShipCells(p.x, p.y, def.size, p.horizontal)) {
+      board[c.y][c.x] = { x: c.x, y: c.y, state: "ship", shipId: p.shipId };
     }
   }
   return board;
 }
 
-export const PlacementScreen: React.FC<PlacementScreenProps> = ({
-  onPlaceShips,
-  onRandomize,
-  onReady,
-  myInfo,
-  opponent,
-  isReady,
-  isShipsPlaced,
+interface Props {
+  onPlaceShips: (ships: PlacedShip[]) => void;
+  onRandomize:  () => void;
+  onReady:      () => void;
+  myInfo:       PlayerInfo;
+  opponent:     PlayerInfo | null;
+  isReady:      boolean;
+  isShipsPlaced:boolean;
+}
+
+export const PlacementScreen: React.FC<Props> = ({
+  onPlaceShips, onRandomize, onReady, myInfo, opponent, isReady,
 }) => {
-  const [placements, setPlacements] = useState<PlacedShip[]>([]);
-  const [selectedShipId, setSelectedShipId] = useState<string | null>(null);
-  const [horizontal, setHorizontal] = useState(true);
-  const [hoverPreview, setHoverPreview] = useState<Array<{ x: number; y: number; valid: boolean }>>([]);
+  const [placements,    setPlacements   ] = useState<PlacedShip[]>([]);
+  const [selectedId,    setSelectedId   ] = useState<string | null>(null);
+  const [horizontal,    setHorizontal   ] = useState(true);
+  const [hoverPreview,  setHoverPreview ] = useState<Array<{ x:number; y:number; valid:boolean }>>([]);
 
-  // Listen for server-randomized ships
+  // Server randomize response
   useEffect(() => {
-    const handler = (e: Event) => {
-      const serverPlacements = (e as CustomEvent<PlacedShip[]>).detail;
-      setPlacements(serverPlacements);
-      setSelectedShipId(null);
+    const h = (e: Event) => {
+      const p = (e as CustomEvent<PlacedShip[]>).detail;
+      setPlacements(p); setSelectedId(null);
     };
-    window.addEventListener("randomized_ships", handler);
-    return () => window.removeEventListener("randomized_ships", handler);
+    window.addEventListener("randomized_ships", h);
+    return () => window.removeEventListener("randomized_ships", h);
   }, []);
 
-  // Keyboard: R to rotate, Escape to deselect
+  // Keyboard shortcuts
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "r" || e.key === "R") setHorizontal((h) => !h);
-      if (e.key === "Escape") setSelectedShipId(null);
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "r" || e.key === "R") setHorizontal(v => !v);
+      if (e.key === "Escape") setSelectedId(null);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   }, []);
 
-  const board = buildBoardFromPlacements(placements);
-  const placedIds = new Set(placements.map((p) => p.shipId));
-  const allPlaced = SHIP_DEFINITIONS.every((d) => placedIds.has(d.id));
+  const board     = buildBoard(placements);
+  const placedIds = new Set(placements.map(p => p.shipId));
+  const allPlaced = SHIP_DEFINITIONS.every(d => placedIds.has(d.id));
 
-  const handleHoverCell = useCallback(
-    (x: number, y: number) => {
-      if (!selectedShipId) {
-        setHoverPreview([]);
-        return;
-      }
-      const def = SHIP_DEFINITIONS.find((d) => d.id === selectedShipId);
+  const handleHover = useCallback((x: number, y: number) => {
+    if (!selectedId) { setHoverPreview([]); return; }
+    const def = SHIP_DEFINITIONS.find(d => d.id === selectedId);
+    if (!def) return;
+    const cells = getShipCells(x, y, def.size, horizontal);
+    const valid = isValidPlacement(x, y, def.size, horizontal, placements);
+    setHoverPreview(cells.map(c => ({ ...c, valid })));
+  }, [selectedId, horizontal, placements]);
+
+  const handleLeave  = useCallback(() => setHoverPreview([]), []);
+
+  const handleClick = useCallback((x: number, y: number) => {
+    if (isReady) return;
+
+    if (selectedId) {
+      const def = SHIP_DEFINITIONS.find(d => d.id === selectedId);
       if (!def) return;
-
-      const cells = getShipCells(x, y, def.size, horizontal);
-      const valid = isValidPlacement(x, y, def.size, horizontal, placements);
-      setHoverPreview(cells.map((c) => ({ ...c, valid })));
-    },
-    [selectedShipId, horizontal, placements]
-  );
-
-  const handleLeaveGrid = useCallback(() => {
-    setHoverPreview([]);
-  }, []);
-
-  const handleClickCell = useCallback(
-    (x: number, y: number) => {
-      if (isReady) return;
-
-      if (selectedShipId) {
-        // Place the selected ship
-        const def = SHIP_DEFINITIONS.find((d) => d.id === selectedShipId);
-        if (!def) return;
-
-        const valid = isValidPlacement(x, y, def.size, horizontal, placements, selectedShipId);
-        if (!valid) return;
-
-        const next = placements.filter((p) => p.shipId !== selectedShipId);
-        next.push({ shipId: selectedShipId, x, y, horizontal });
-        setPlacements(next);
-        setSelectedShipId(null);
-        setHoverPreview([]);
-
-        // Auto-send to server
-        const allNew = [...next];
-        if (SHIP_DEFINITIONS.every((d) => allNew.some((p) => p.shipId === d.id))) {
-          onPlaceShips(allNew);
-        }
-      } else {
-        // Click on existing ship to re-select it
-        const cell = board[y]?.[x];
-        if (cell?.state === "ship" && cell.shipId) {
-          setSelectedShipId(cell.shipId);
-          // Remove it from placements so it can be moved
-          setPlacements((prev) => prev.filter((p) => p.shipId !== cell.shipId));
-        }
+      if (!isValidPlacement(x, y, def.size, horizontal, placements, selectedId)) return;
+      const next = [...placements.filter(p => p.shipId !== selectedId), { shipId: selectedId, x, y, horizontal }];
+      setPlacements(next);
+      setSelectedId(null);
+      setHoverPreview([]);
+      if (SHIP_DEFINITIONS.every(d => next.some(p => p.shipId === d.id))) onPlaceShips(next);
+    } else {
+      const cell = board[y]?.[x];
+      if (cell?.state === "ship" && cell.shipId) {
+        setSelectedId(cell.shipId);
+        setPlacements(prev => prev.filter(p => p.shipId !== cell.shipId));
       }
-    },
-    [isReady, selectedShipId, horizontal, placements, onPlaceShips, board]
-  );
+    }
+  }, [isReady, selectedId, horizontal, placements, board, onPlaceShips]);
 
   const handleRandomize = () => {
-    const newPlacements = randomizePlacementsClient();
-    setPlacements(newPlacements);
-    setSelectedShipId(null);
-    onPlaceShips(newPlacements);
-    // Also tell server to randomize (optional — client already has them)
-    onRandomize();
-  };
-
-  const handleClearAll = () => {
-    if (isReady) return;
-    setPlacements([]);
-    setSelectedShipId(null);
+    const p = randomizePlacementsClient();
+    setPlacements(p); setSelectedId(null);
+    onPlaceShips(p); onRandomize();
   };
 
   return (
     <div className="placement-screen">
-      {/* Left: board + players */}
       <div className="placement-left">
         {/* Players row */}
-        <div className="players-list" style={{ justifyContent: "flex-start" }}>
-          <PlayerCard player={myInfo} isMe={true} showReady={true} />
-          {opponent ? (
-            <PlayerCard player={opponent} isMe={false} showReady={true} />
-          ) : (
-            <div className="opponent-status">
-              <div className="blink-dot" />
-              Waiting for opponent...
-            </div>
-          )}
+        <div className="players-list" style={{ justifyContent:"flex-start" }}>
+          <PlayerCard player={myInfo} isMe showReady />
+          {opponent
+            ? <PlayerCard player={opponent} isMe={false} showReady />
+            : <div className="opponent-status"><div className="blink-dot"/>Waiting for opponent...</div>}
         </div>
 
         <Grid
           board={board}
           previewCells={hoverPreview}
-          onHoverCell={handleHoverCell}
-          onLeaveGrid={handleLeaveGrid}
-          onClickCell={handleClickCell}
+          onHoverCell={handleHover}
+          onLeaveGrid={handleLeave}
+          onClickCell={handleClick}
         />
 
         <div className="placement-hint">
-          {selectedShipId
-            ? `Placing ${SHIP_DEFINITIONS.find((d) => d.id === selectedShipId)?.name} — click grid to place · [R] to rotate`
-            : "Click a ship to select · Click placed ship to move"}
+          {selectedId
+            ? `Placing ${SHIP_DEFINITIONS.find(d=>d.id===selectedId)?.name} · [R] rotate · [Esc] cancel`
+            : allPlaced ? "All ships placed! Click a ship to move it." : "Select a ship below, then click the grid"}
         </div>
       </div>
 
-      {/* Right: ship palette + controls */}
       <div className="placement-right">
-        <div className="placement-title">Fleet</div>
+        <div className="placement-title">Your Fleet</div>
 
         <div className="ship-palette">
-          {SHIP_DEFINITIONS.map((def) => {
-            const placed = placedIds.has(def.id) && selectedShipId !== def.id;
-            const selected = selectedShipId === def.id;
+          {SHIP_DEFINITIONS.map(def => {
+            const placed   = placedIds.has(def.id) && selectedId !== def.id;
+            const selected = selectedId === def.id;
             return (
               <div
                 key={def.id}
                 className={`ship-item ${placed ? "placed" : ""} ${selected ? "selected" : ""}`}
-                onClick={() => {
-                  if (isReady) return;
-                  if (placed) return;
-                  setSelectedShipId(selected ? null : def.id);
-                }}
+                onClick={() => { if (isReady || placed) return; setSelectedId(selected ? null : def.id); }}
               >
-                <div>
-                  <div className="ship-mini-bar">
-                    {Array.from({ length: def.size }).map((_, i) => (
-                      <div key={i} className="ship-mini-cell" />
-                    ))}
-                  </div>
+                <div className="ship-mini-bar">
+                  {Array.from({ length: def.size }).map((_, i) => <div key={i} className="ship-mini-cell" />)}
                 </div>
                 <div className="ship-item-info">
                   <div className="ship-item-name">{def.name}</div>
                   <div className="ship-item-size">{def.size} cells</div>
                 </div>
-                {placed && <span style={{ color: "var(--accent-pulse)", fontSize: 11 }}>✓</span>}
+                {placed && <span style={{ color:"var(--accent-pulse)", fontSize:10 }}>✓</span>}
               </div>
             );
           })}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setHorizontal((h) => !h)}
-            disabled={isReady}
-          >
+        <div style={{ display:"flex", flexDirection:"column", gap:4, marginTop:4 }}>
+          <button className="btn btn-ghost" onClick={() => setHorizontal(h => !h)} disabled={isReady}>
             ↻ {horizontal ? "Horizontal" : "Vertical"}
           </button>
-
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleRandomize}
-            disabled={isReady}
-          >
+          <button className="btn btn-primary" onClick={handleRandomize} disabled={isReady}>
             ⚄ Randomize
           </button>
-
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={handleClearAll}
-            disabled={isReady || placements.length === 0}
-          >
-            ✕ Clear
+          <button className="btn btn-ghost"
+            onClick={() => { if (!isReady) { setPlacements([]); setSelectedId(null); } }}
+            disabled={isReady || placements.length === 0}>
+            ✕ Clear All
           </button>
-
-          <button
-            className="btn btn-ready"
-            onClick={onReady}
-            disabled={!allPlaced || isReady}
-            style={{ marginTop: 6 }}
-          >
+          <button className="btn btn-ready" style={{ marginTop:6 }}
+            onClick={onReady} disabled={!allPlaced || isReady}>
             {isReady ? "✓ Ready!" : "Ready →"}
           </button>
         </div>
 
         {isReady && (
-          <div className="opponent-status" style={{ marginTop: 6 }}>
-            <div className="blink-dot" />
+          <div className="opponent-status" style={{ marginTop:5 }}>
+            <div className="blink-dot"/>
             {opponent?.ready ? "Game starting..." : "Waiting for opponent..."}
           </div>
         )}

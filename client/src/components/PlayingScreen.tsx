@@ -4,80 +4,73 @@ import { Grid } from "./Grid";
 import { ActivityLog } from "./ActivityLog";
 import { ShipHealth } from "./ShipHealth";
 
-interface PlayingScreenProps {
+interface Props {
   gameState: ClientGameState;
   lastAttackResult: { result: AttackResult; attackerId: string } | null;
   onAttack: (x: number, y: number) => void;
 }
 
-export const PlayingScreen: React.FC<PlayingScreenProps> = ({
-  gameState,
-  lastAttackResult,
-  onAttack,
-}) => {
-  const { mySessionId, currentTurnId, players, myBoard, opponentBoard, myShips, log } =
-    gameState;
+export const PlayingScreen: React.FC<Props> = ({ gameState, lastAttackResult, onAttack }) => {
+  const { mySessionId, currentTurnId, players, myBoard, opponentBoard, myShips, log } = gameState;
 
   const isMyTurn = currentTurnId === mySessionId;
-  const me = players.find((p) => p.sessionId === mySessionId);
-  const opponent = players.find((p) => p.sessionId !== mySessionId);
+  const me       = players.find(p => p.sessionId === mySessionId);
+  const opponent = players.find(p => p.sessionId !== mySessionId);
 
   const [flashCell, setFlashCell] = useState<{ x: number; y: number } | null>(null);
 
-  // Flash the last attacked cell
   useEffect(() => {
-    if (lastAttackResult) {
-      const { x, y } = lastAttackResult.result;
-      setFlashCell({ x, y });
-      const timer = setTimeout(() => setFlashCell(null), 500);
-      return () => clearTimeout(timer);
-    }
+    if (!lastAttackResult) return;
+    const { x, y } = lastAttackResult.result;
+    setFlashCell({ x, y });
+    const t = setTimeout(() => setFlashCell(null), 450);
+    return () => clearTimeout(t);
   }, [lastAttackResult]);
 
-  const handleAttack = (x: number, y: number) => {
-    if (!isMyTurn) return;
-    onAttack(x, y);
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, overflow: "hidden" }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:5, flex:1, overflow:"hidden", minHeight:0 }}>
+
       {/* Turn banner */}
       <div className={`turn-banner ${isMyTurn ? "my-turn" : "their-turn"}`}>
         {isMyTurn
-          ? "⚡ YOUR TURN — SELECT TARGET"
-          : `⏳ ${opponent?.username ?? "Opponent"}'s turn`}
+          ? "⚡ YOUR TURN — FIRE!"
+          : `⌛ ${opponent?.username ?? "Opponent"}'s turn`}
       </div>
 
-      {/* Main game layout */}
-      <div className="game-layout">
-        {/* My board */}
+      {/* Boards + log */}
+      <div className="game-layout" style={{ flex:1, minHeight:0 }}>
+
+        {/* My fleet */}
         <div className="board-section">
           <div className="board-label">
+            {me?.avatarUrl && (
+              <img src={me.avatarUrl} alt="" style={{ width:14, height:14, borderRadius:"50%", verticalAlign:"middle", marginRight:4 }} />
+            )}
             {me?.username ?? "Your Fleet"}
           </div>
           <Grid board={myBoard} />
-          <ShipHealth ships={myShips} label="My Fleet" />
+          <ShipHealth ships={myShips} />
         </div>
 
-        {/* Activity log (center) */}
+        {/* Log */}
         <ActivityLog entries={log} />
 
-        {/* Opponent board */}
+        {/* Enemy waters */}
         <div className="board-section">
           <div className="board-label enemy">
+            {opponent?.avatarUrl && (
+              <img src={opponent.avatarUrl} alt="" style={{ width:14, height:14, borderRadius:"50%", verticalAlign:"middle", marginRight:4 }} />
+            )}
             {opponent?.username ?? "Enemy Waters"}
           </div>
           <Grid
             board={opponentBoard}
             attackable={isMyTurn}
-            onAttack={handleAttack}
-            flashCell={
-              lastAttackResult?.attackerId === mySessionId ? flashCell : null
-            }
+            onAttack={isMyTurn ? onAttack : undefined}
+            flashCell={lastAttackResult?.attackerId === mySessionId ? flashCell : null}
           />
-          {/* Sunk ships info from log */}
-          <div style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", marginTop: 2 }}>
-            {isMyTurn ? "Click to attack" : "Waiting..."}
+          <div style={{ fontSize:9, color:"var(--text-muted)", textAlign:"center", fontFamily:"var(--font-display)", letterSpacing:"0.1em" }}>
+            {isMyTurn ? "◎ SELECT TARGET" : "STANDBY..."}
           </div>
         </div>
       </div>

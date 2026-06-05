@@ -1,17 +1,13 @@
 import { DiscordSDK, DiscordSDKMock } from "@discord/embedded-app-sdk";
 
-// Discord Application ID from environment variable
 const CLIENT_ID = (import.meta as any).env.VITE_DISCORD_CLIENT_ID as string || "YOUR_APP_CLIENT_ID";
 
-// Detect if we're running inside Discord Activity iframe
 function isRunningInDiscord(): boolean {
   try {
     const params = new URLSearchParams(window.location.search);
-    // Discord injects frame_id param, or hostname will be discordsays.com
     return (
       params.has("frame_id") ||
-      window.location.hostname.includes("discordsays.com") ||
-      window.location.hostname.includes("discord.com")
+      window.location.hostname.includes("discordsays.com")
     );
   } catch {
     return false;
@@ -45,21 +41,18 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
     isAuthenticated: false,
   };
 
-  // In development / outside Discord, use mock SDK
   if (!isRunningInDiscord() || CLIENT_ID === "YOUR_APP_CLIENT_ID") {
-    console.log("[Discord SDK] Using mock SDK (not running inside Discord)");
+    console.log("[Discord SDK] Mock mode");
     const mockSdk = new DiscordSDKMock(CLIENT_ID, null, null, null);
     _sdk = mockSdk;
-
-    // Mock context for development
     context.channelId = "dev-channel-001";
     context.guildId = "dev-guild-001";
     context.instanceId = "dev-instance-001";
     context.user = {
-      id: `dev-user-${Math.random().toString(36).slice(2, 6)}`,
+      id: `dev-${Math.random().toString(36).slice(2, 8)}`,
       username: `DevPlayer${Math.floor(Math.random() * 99)}`,
       avatar: null,
-      discriminator: "0000",
+      discriminator: "0",
       global_name: null,
     };
     return context;
@@ -68,7 +61,6 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
   try {
     const sdk = new DiscordSDK(CLIENT_ID);
     _sdk = sdk;
-
     await sdk.ready();
     console.log("[Discord SDK] Ready");
 
@@ -76,24 +68,25 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
     context.guildId = sdk.guildId;
     context.instanceId = sdk.instanceId;
 
-    // Try to get user identity via OAuth
+    // ── OAuth2 PKCE flow to get real user identity ──────────────────
     try {
       const { code } = await sdk.commands.authorize({
         client_id: CLIENT_ID,
         response_type: "code",
         state: "",
         prompt: "none",
-        scope: ["identify", "guilds", "rpc.activities.write"],
+        scope: ["identify", "rpc.activities.write"],
       });
 
-      const tokenResponse = await fetch("/api/discord/token", {
+      // Exchange via your backend /api/discord/token
+      const tokenRes = await fetch("/api/discord/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
 
-      if (tokenResponse.ok) {
-        const { access_token } = await tokenResponse.json();
+      if (tokenRes.ok) {
+        const { access_token } = await tokenRes.json();
         const auth = await sdk.commands.authenticate({ access_token });
 
         if (auth?.user) {
@@ -105,22 +98,47 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
             global_name: (auth.user as any).global_name ?? null,
           };
           context.isAuthenticated = true;
+          console.log("[Discord SDK] Authenticated as:", context.user.username);
         }
+      } else {
+        throw new Error("Token exchange failed");
       }
     } catch (authErr) {
-      // Auth failed — game still works, just without Discord username/avatar
-      console.warn("[Discord SDK] OAuth skipped:", authErr);
-      // Fallback: use a guest name based on instanceId
-      context.user = {
-        id: `guest-${context.instanceId?.slice(-6) ?? Math.random().toString(36).slice(2, 6)}`,
-        username: `Player-${context.instanceId?.slice(-4) ?? "???"}`,
-        avatar: null,
-        discriminator: "0",
-        global_name: null,
-      };
+      // ── Fallback: use Discord RPC participant info ─────────────────
+      // This gives us the user's display name even without a backend token exchange
+      console.warn("[Discord SDK] Full auth failed, using participant fallback:", authErr);
+      try {
+        const participants = await sdk.commands.getInstanceConnectedParticipants();
+        // The first participant is usually the current user
+        const me = (participants as any)?.participants?.[0];
+        if (me) {
+          context.user = {
+            id: me.id ?? `guest-${context.instanceId?.slice(-6)}`,
+            username: me.username ?? me.nickname ?? `Player`,
+            avatar: me.avatar ?? null,
+            discriminator: me.discriminator ?? "0",
+            global_name: me.global_name ?? me.nick ?? null,
+          };
+        } else {
+          // Last resort: anonymous guest
+          context.user = {
+            id: `guest-${context.instanceId?.slice(-6) ?? Math.random().toString(36).slice(2,8)}`,
+            username: `Player`,
+            avatar: null,
+            discriminator: "0",
+            global_name: null,
+          };
+        }
+      } catch {
+        context.user = {
+          id: `guest-${Math.random().toString(36).slice(2,8)}`,
+          username: `Player`,
+          avatar: null,
+          discriminator: "0",
+          global_name: null,
+        };
+      }
     }
-
-    console.log("[Discord SDK] Context:", context);
   } catch (err) {
     console.error("[Discord SDK] Init failed:", err);
   }
@@ -128,9 +146,7 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
   return context;
 }
 
-export function getSDK(): DiscordSDK | DiscordSDKMock | null {
-  return _sdk;
-}
+export function getSDK() { return _sdk; }
 
 export function getAvatarUrl(userId: string, avatarHash: string | null): string | undefined {
   if (!avatarHash) return undefined;
