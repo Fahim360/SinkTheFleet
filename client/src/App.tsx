@@ -10,23 +10,34 @@ import { Grid } from "./components/Grid";
 import { ActivityLog } from "./components/ActivityLog";
 import { PlacedShip } from "./types";
 
-// Determine server URL:
-// - In Discord Activity (iframe), use relative proxy path
-// - In dev, use env var or localhost
+// Resolve the Colyseus WebSocket server URL.
+//
+// Inside Discord (discordsays.com iframe):
+//   → Use relative proxy path /colyseus
+//   → Must match the Proxy Path Mapping in Discord Developer Portal:
+//       Prefix: /colyseus  →  Target: your-railway-app.up.railway.app
+//
+// Outside Discord (browser / dev):
+//   → Use VITE_SERVER_URL env var, or fall back to localhost
 function resolveServerUrl(): string {
-  const fromEnv = (import.meta as unknown as { env: Record<string, string> }).env.VITE_SERVER_URL;
-  if (fromEnv) return fromEnv;
+  const isDiscordIframe =
+    window.location.hostname.includes("discordsays.com") ||
+    new URLSearchParams(window.location.search).has("frame_id");
 
-  // If running behind Discord's proxy (in an iframe), use relative WS path
-  if (window.location !== window.parent.location) {
+  if (isDiscordIframe) {
+    // Route through Discord's proxy — prefix must match Developer Portal mapping
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${window.location.host}/.proxy/colyseus`;
+    return `${proto}//${window.location.host}/colyseus`;
   }
+
+  const fromEnv = (import.meta as any).env.VITE_SERVER_URL as string | undefined;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
 
   return "ws://localhost:3001";
 }
 
 function resolveRoomId(ctx: DiscordContext): string {
+  // Use instanceId so every Activity launch gets its own room
   if (ctx.instanceId) return `discord_${ctx.instanceId}`;
   if (ctx.channelId) return `discord_${ctx.channelId}`;
   return "discord_dev";
@@ -108,7 +119,7 @@ const GameApp: React.FC<{ discordCtx: DiscordContext }> = ({ discordCtx }) => {
       <div className="app-header">
         <div className="app-title">⚓ Sink the Fleet</div>
         <div className="header-right">
-          {gameState?.spectatorCount && gameState.spectatorCount > 0 && (
+          {gameState?.spectatorCount != null && gameState.spectatorCount > 0 && (
             <div className="spectator-badge">
               👁 {gameState.spectatorCount}
             </div>
@@ -166,7 +177,7 @@ const GameApp: React.FC<{ discordCtx: DiscordContext }> = ({ discordCtx }) => {
         )
       ) : gameState.phase === "playing" ? (
         myInfo?.isSpectator ? (
-          // Spectator view during play — see attack results on both boards
+          // Spectator view — see attack results on both boards, no hidden ships
           <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, overflow: "hidden" }}>
             <div className="turn-banner their-turn">
               👁 SPECTATING —{" "}

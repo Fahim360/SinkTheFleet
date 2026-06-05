@@ -1,15 +1,18 @@
 import { DiscordSDK, DiscordSDKMock } from "@discord/embedded-app-sdk";
 
 // Discord Application ID from environment variable
-const CLIENT_ID = (import.meta as unknown as { env: Record<string, string> }).env.VITE_DISCORD_CLIENT_ID || "YOUR_APP_CLIENT_ID";
+const CLIENT_ID = (import.meta as any).env.VITE_DISCORD_CLIENT_ID as string || "YOUR_APP_CLIENT_ID";
 
 // Detect if we're running inside Discord Activity iframe
-// Discord Activities are loaded inside an iframe on the discord.com domain
 function isRunningInDiscord(): boolean {
   try {
-    // Discord injects a frame_id query param when loading Activities
     const params = new URLSearchParams(window.location.search);
-    return params.has("frame_id") || window !== window.parent;
+    // Discord injects frame_id param, or hostname will be discordsays.com
+    return (
+      params.has("frame_id") ||
+      window.location.hostname.includes("discordsays.com") ||
+      window.location.hostname.includes("discord.com")
+    );
   } catch {
     return false;
   }
@@ -66,32 +69,23 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
     const sdk = new DiscordSDK(CLIENT_ID);
     _sdk = sdk;
 
-    // Wait for SDK to be ready
     await sdk.ready();
     console.log("[Discord SDK] Ready");
 
-    // Get instance context
-    const instanceContext = await sdk.commands.getInstanceConnectedParticipants();
     context.channelId = sdk.channelId;
     context.guildId = sdk.guildId;
     context.instanceId = sdk.instanceId;
 
-    // Authorize and get user info
-    const { code } = await sdk.commands.authorize({
-      client_id: CLIENT_ID,
-      response_type: "code",
-      state: "",
-      prompt: "none",
-      scope: [
-        "identify",
-        "guilds",
-        "rpc.activities.write",
-      ],
-    });
-
-    // Exchange code for access token (requires your backend)
-    // For simplicity, try the exchange endpoint
+    // Try to get user identity via OAuth
     try {
+      const { code } = await sdk.commands.authorize({
+        client_id: CLIENT_ID,
+        response_type: "code",
+        state: "",
+        prompt: "none",
+        scope: ["identify", "guilds", "rpc.activities.write"],
+      });
+
       const tokenResponse = await fetch("/api/discord/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,17 +102,25 @@ export async function initDiscordSDK(): Promise<DiscordContext> {
             username: auth.user.username,
             avatar: auth.user.avatar ?? null,
             discriminator: auth.user.discriminator ?? "0",
-            global_name: (auth.user as { global_name?: string }).global_name,
+            global_name: (auth.user as any).global_name ?? null,
           };
           context.isAuthenticated = true;
         }
       }
     } catch (authErr) {
-      console.warn("[Discord SDK] OAuth failed, continuing without user auth:", authErr);
+      // Auth failed — game still works, just without Discord username/avatar
+      console.warn("[Discord SDK] OAuth skipped:", authErr);
+      // Fallback: use a guest name based on instanceId
+      context.user = {
+        id: `guest-${context.instanceId?.slice(-6) ?? Math.random().toString(36).slice(2, 6)}`,
+        username: `Player-${context.instanceId?.slice(-4) ?? "???"}`,
+        avatar: null,
+        discriminator: "0",
+        global_name: null,
+      };
     }
 
     console.log("[Discord SDK] Context:", context);
-    void instanceContext;
   } catch (err) {
     console.error("[Discord SDK] Init failed:", err);
   }
